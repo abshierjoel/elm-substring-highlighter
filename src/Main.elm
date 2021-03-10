@@ -1,6 +1,7 @@
 module Main exposing (..)
 
 import Browser
+import Dict exposing (Dict)
 import Element exposing (..)
 import Element.Background as Background
 import Element.Border as Border
@@ -65,21 +66,94 @@ update msg model =
 ---- PARSE ----
 
 
-matcher : ( List Char, String ) -> Parser String
-matcher ( key, body ) =
-    succeed ()
-        |. chompWhile (\c -> c /= maybeChar (List.head key))
-        |> Parser.getChompedString
+type ValidWord
+    = Numeric String
+    | Alphabetic String (Maybe String)
 
 
-maybeChar : Maybe Char -> Char
-maybeChar char =
-    case char of
-        Just c ->
-            c
+validWordToString : ValidWord -> String
+validWordToString vw =
+    case vw of
+        Numeric word ->
+            word
 
-        Nothing ->
-            ' '
+        Alphabetic word contraction_ ->
+            contraction_
+                |> Maybe.withDefault ""
+                |> (++) word
+
+
+apostrophe : Char
+apostrophe =
+    Char.fromCode 39
+
+
+isIgnorable : Char -> Bool
+isIgnorable =
+    not << Char.isAlphaNum
+
+
+numericWord : Parser String
+numericWord =
+    succeed Numeric
+        |. chompWhile isIgnorable
+        |= (getChompedString <|
+                succeed identity
+                    |. chompIf Char.isDigit
+                    |. chompWhile Char.isDigit
+           )
+        --|. chompIf isIgnorable
+        |. chompWhile isIgnorable
+
+
+contraction : Parser (Maybe String)
+contraction =
+    (getChompedString <|
+        succeed identity
+            |. chompIf ((==) apostrophe)
+            |. chompIf Char.isAlpha
+            |. chompWhile Char.isAlpha
+    )
+        |> Parser.map Just
+
+
+alphabeticWord : Parser String
+alphabeticWord =
+    succeed Alphabetic
+        |. chompWhile isIgnorable
+        |= (getChompedString <|
+                succeed identity
+                    |. chompIf Char.isAlphaNum
+                    |. chompWhile Char.isAlpha
+           )
+        |= oneOf [ backtrackable contraction, succeed Nothing ]
+        --|. chompIf isIgnorable
+        |. chompWhile isIgnorable
+
+
+matchHelper : String -> Parser (Step (List String) (List String))
+matchHelper match =
+    oneOf
+        [ succeed (\vw -> Loop (vw :: match))
+            |= oneOf [ backtrackable alphabeticWord, backtrackable numericWord ]
+        , succeed () |> Parser.map (\_ -> Done (List.reverse match))
+        ]
+
+
+parseString : String -> Parser (List String)
+parseString match =
+    loop [] matchHelper
+        |> Parser.map (String.toLower match)
+
+
+getWords : String -> String -> List String
+getWords key body =
+    case Parser.run (parseString key) body of
+        Ok tokenList ->
+            tokenList
+
+        Err _ ->
+            []
 
 
 
@@ -90,15 +164,15 @@ view : Model -> Html Msg
 view model =
     let
         parsedString =
-            run <| matcher ( String.toList model.input, model.body )
+            run getWords "am" "Ammunition American Party AMT"
 
         result =
-            case parsedString model.body of
+            case parsedString of
                 Ok res ->
-                    res
+                    List.map (\x -> text x) res
 
                 _ ->
-                    "Failure"
+                    [ text "Failure" ]
     in
     layout [] <|
         column [ width fill, paddingXY 500 50, spacing 20 ]
@@ -122,5 +196,5 @@ view model =
                 ]
                 [ paragraph [ Font.italic, Font.size 14, Font.color (rgb 0.2 0.2 0.2) ] [ text model.body ] ]
             , row [ width fill ]
-                [ paragraph [] [ text result ] ]
+                [ paragraph [] result ]
             ]
