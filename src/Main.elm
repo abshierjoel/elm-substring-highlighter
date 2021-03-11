@@ -66,84 +66,33 @@ update msg model =
 ---- PARSE ----
 
 
-type ValidWord
-    = Numeric String
-    | Alphabetic String (Maybe String)
+matchingWord : String -> Parser String
+matchingWord key =
+    succeed ()
+        |. symbol "-"
+        |= List.head (String.toList key)
 
 
-validWordToString : ValidWord -> String
-validWordToString vw =
-    case vw of
-        Numeric word ->
-            word
-
-        Alphabetic word contraction_ ->
-            contraction_
-                |> Maybe.withDefault ""
-                |> (++) word
+string =
+    succeed ()
+        |> getChompedString
 
 
-apostrophe : Char
-apostrophe =
-    Char.fromCode 39
-
-
-isIgnorable : Char -> Bool
-isIgnorable =
-    not << Char.isAlphaNum
-
-
-numericWord : Parser String
-numericWord =
-    succeed Numeric
-        |. chompWhile isIgnorable
-        |= (getChompedString <|
-                succeed identity
-                    |. chompIf Char.isDigit
-                    |. chompWhile Char.isDigit
-           )
-        --|. chompIf isIgnorable
-        |. chompWhile isIgnorable
-
-
-contraction : Parser (Maybe String)
-contraction =
-    (getChompedString <|
-        succeed identity
-            |. chompIf ((==) apostrophe)
-            |. chompIf Char.isAlpha
-            |. chompWhile Char.isAlpha
-    )
-        |> Parser.map Just
-
-
-alphabeticWord : Parser String
-alphabeticWord =
-    succeed Alphabetic
-        |. chompWhile isIgnorable
-        |= (getChompedString <|
-                succeed identity
-                    |. chompIf Char.isAlphaNum
-                    |. chompWhile Char.isAlpha
-           )
-        |= oneOf [ backtrackable contraction, succeed Nothing ]
-        --|. chompIf isIgnorable
-        |. chompWhile isIgnorable
-
-
-matchHelper : String -> Parser (Step (List String) (List String))
-matchHelper match =
+matchHelper : String -> List String -> Parser (Step (List String) (List String))
+matchHelper key list =
     oneOf
-        [ succeed (\vw -> Loop (vw :: match))
-            |= oneOf [ backtrackable alphabeticWord, backtrackable numericWord ]
-        , succeed () |> Parser.map (\_ -> Done (List.reverse match))
+        [ succeed (\vw -> Loop (vw :: list))
+            |= oneOf
+                [ backtrackable <| matchingWord key
+                , string
+                ]
+        , succeed () |> Parser.map (\_ -> Done (List.reverse list))
         ]
 
 
 parseString : String -> Parser (List String)
-parseString match =
-    loop [] matchHelper
-        |> Parser.map (String.toLower match)
+parseString key =
+    loop [] (matchHelper key)
 
 
 getWords : String -> String -> List String
